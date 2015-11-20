@@ -1,0 +1,25 @@
+{
+    "name": "strong2much/yii2-facebook",
+    "type": "yii2-extension",
+    "minimum-stability": "stable",
+    "description": "Helper class to work with Facebook services and API",
+    "keywords": ["yii2", "facebook"],
+    "homepage": "https://github.com/strong2much/yii2-facebook.git",
+	"license": "BSD-3-Clause",
+    "authors": [
+        {
+          "name": "Denis A. Tatarnikov",
+          "email": "strong2much@gmail.com",
+          "homepage": "https://github.com/strong2much"
+        }
+    ],
+    "require": {
+        "php": ">=5.5",
+        "yiisoft/yii2": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "strong2much\\facebook\\": "src/"
+        }
+    }
+}
