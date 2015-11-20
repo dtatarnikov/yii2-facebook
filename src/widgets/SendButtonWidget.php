@@ -8,7 +8,7 @@ use yii\helpers\Html;
  *
  * @author   Denis Tatarnikov <tatarnikovda@gmail.com>
  */
-class FbSendButtonWidget extends Widget
+class SendButtonWidget extends Widget
 {
     const FONT_ARIAL = 'arial';
     const FONT_LUCIDA_GRANDE = 'lucida grande';
