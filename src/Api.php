@@ -36,7 +36,7 @@ class Api extends Component
             $params['locale'] = Yii::$app->language;
         }
 
-        $result = (array)$this->makeRequest(self::$domainMap['api'].'v'.$this->version.'/'.$method, ['query' => $params]);
+        $result = (array)$this->makeRequest(static::$domainMap['api'].'v'.$this->version.'/'.$method, ['query' => $params]);
 
         return $result;
     }
