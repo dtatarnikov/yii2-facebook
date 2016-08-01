@@ -4,6 +4,9 @@ namespace strong2much\facebook;
 use Yii;
 use yii\base\Component;
 use yii\base\Exception;
+use yii\helpers\Json;
+use yii\httpclient\Client;
+use yii\web\HttpException;
 
 /**
  * Api class
@@ -12,18 +15,12 @@ use yii\base\Exception;
  */
 class Api extends Component
 {
+    const API_BASE_URL = 'https://graph.facebook.com';
+
     /**
      * @var string API version
      */
-    public $version = '2.4';
-
-    /**
-     * @var array Maps aliases to Facebook domains.
-     */
-    protected static $domainMap = [
-        'api' => 'https://graph.facebook.com/',
-    ];
-
+    public $version = '2.6';
 
     /**
      * @param string $method method name
@@ -36,72 +33,69 @@ class Api extends Component
             $params['locale'] = Yii::$app->language;
         }
 
-        $result = (array)$this->makeRequest(static::$domainMap['api'].'v'.$this->version.'/'.$method, ['query' => $params]);
-
+        $result = $this->makeRequest($method, ['query' => $params]);
         return $result;
     }
 
     /**
      * Makes the curl request to the url.
-     * @param string $url url to request.
-     * @param array $options HTTP request options. Keys: query, data, referer, headers.
-     * @param boolean $parseJson Whether to parse response in json format.
+     * @param string $url relative url to request.
+     * @param array $options HTTP request options. Keys: query, data, options, headers.
      * @return array|mixed the response.
      * @throws Exception
      */
-    protected function makeRequest($url, $options = [], $parseJson = true)
+    protected function makeRequest($url, $options = [])
     {
-        $ch = $this->initRequest($url, $options);
+        $request = $this->initRequest($url, $options);
+        $response = $request->send();
 
-        $result = curl_exec($ch);
-        $headers = curl_getinfo($ch);
-
-        if (curl_errno($ch) > 0) {
-            throw new Exception(curl_error($ch), curl_errno($ch));
+        $data = $response->getData();
+        $error = $this->fetchJsonError($data);
+        if($error != null) {
+            throw new Exception($error['message'], $error['code']);
         }
 
-        if ($headers['http_code'] != 200) {
+        if(!$response->isOk) {
             Yii::error(
-                'Invalid response http code: ' . $headers['http_code'] . '.' . PHP_EOL .
+                'Invalid response http code: ' . $response->getStatusCode() . '.' . PHP_EOL .
+                'Headers: ' . Json::encode($response->getHeaders()->toArray()) . '.' . PHP_EOL .
                 'URL: ' . $url . PHP_EOL .
-                'Options: ' . var_export($options, true) . PHP_EOL .
-                'Result: ' . $result, 'application.extensions.facebook'
+                'Options: ' . Json::encode($options) . PHP_EOL .
+                'Result: ' . (is_array($data) ? Json::encode($data) : var_export($data, true)),
+                __METHOD__
             );
-            throw new Exception(Yii::t('facebook', 'Invalid response http code: {code}.', ['{code}' => $headers['http_code']]), $headers['http_code']);
+            throw new HttpException($response->getStatusCode());
         }
 
-        curl_close($ch);
-
-        if ($parseJson) {
-            $result = $this->parseJson($result);
-        }
-
-        return $result;
+        return $data;
     }
 
     /**
-     * Initializes a new session and return a cURL handle.
-     * @param string $url url to request.
-     * @param array $options HTTP request options. Keys: query, data, referer, headers.
-     * @return resource cURL handle.
+     * Initializes a new request.
+     * @param string $url relative url to request.
+     * @param array $options HTTP request options. Keys: query, data, headers, options
+     * @return \yii\httpclient\Request
      */
     protected function initRequest($url, $options = [])
     {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 0);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_HEADER, 0);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
-        curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_0);
+        $client = new Client([
+            'baseUrl' => self::API_BASE_URL.'/v'.$this->version,
+            'responseConfig' => [
+                'format' => Client::FORMAT_JSON
+            ],
+        ]);
 
-        if (isset($options['referer'])) {
-            curl_setopt($ch, CURLOPT_REFERER, $options['referer']);
+        $request = $client->createRequest();
+        if (isset($options['data'])) {
+            $request->setMethod('post');
+            $request->setData($options['data']);
         }
-
-        if (isset($options['headers'])) {
-            curl_setopt($ch, CURLOPT_HTTPHEADER, $options['headers']);
+        if (!empty($options['headers'])) {
+            $request->setHeaders($options['headers']);
         }
-
+        if (!empty($options['options'])) {
+            $request->setOptions($options['options']);
+        }
         if (isset($options['query'])) {
             $url_parts = parse_url($url);
             if (isset($url_parts['query'])) {
@@ -118,46 +112,14 @@ class Api extends Component
                 $url .= '?' . $new_query;
             }
         }
+        $request->setUrl($url);
 
-        if (isset($options['data'])) {
-            curl_setopt($ch, CURLOPT_POST, 1);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $options['data']);
-        }
-
-        curl_setopt($ch, CURLOPT_URL, $url);
-        return $ch;
-    }
-
-    /**
-     * Parse response from {@link makeRequest} in json format and check OAuth errors.
-     * @param string $response Json string.
-     * @return array result as associative array.
-     * @throws Exception
-     */
-    protected function parseJson($response)
-    {
-        try {
-            $result = json_decode($response, true);
-            $error = $this->fetchJsonError($result);
-            if (!isset($result)) {
-                throw new Exception(Yii::t('facebook', 'Invalid response format.', []), 500);
-            }
-            else {
-                if (isset($error) && !empty($error['message'])) {
-                    throw new Exception($error['message'], $error['code']);
-                }
-                else {
-                    return $result;
-                }
-            }
-        } catch (Exception $e) {
-            throw new Exception($e->getMessage(), $e->getCode());
-        }
+        return $request;
     }
 
     /**
      * Returns the error info from json.
-     * @param \stdClass $json the json response.
+     * @param array $json the json response.
      * @return array the error array with 2 keys: code and message. Should be null if no errors.
      */
     protected function fetchJsonError($json)
